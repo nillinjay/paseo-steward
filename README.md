@@ -1,80 +1,80 @@
-# Steward — a Paseo plugin that supervises a project
+# paseo-steward
 
-One steward per project. It dispatches work into per-leg git worktrees, verifies every leg with a deterministic gate,
-accepts only what leaves an artifact with provenance, and asks a human nothing it can decide itself.
+**One steward per project.** It watches a project's own records, keeps at most two implementation slots busy,
+verifies work with a deterministic gate, and never asks you anything outside four classes.
 
-```bash
-paseo plugin add <owner>/paseo-steward
-paseo reload
-```
+Install → reload → open a project. `OVERVIEW.md` lists every surface and every warning. `plan.md` is the
+contract; `DESIGN-V2.md` is the design; `control/COMMAND.md` is the live ledger.
 
-Then open a project's steward screen and press **Onboard**: it creates the five files the steward reads, registers the
-project with Paseo, and reports seven gates honestly. It never invents goals.
-
-## What it actually does
-
-| Surface | Behaviour |
-|---|---|
-| **Dispatch** | Reads `control/COMMAND.md`'s Ready queue, dispatches a leg into its own worktree through the owner's profile roster, and records a task manifest it owns — a worker never writes scheduler metadata |
-| **Acceptance** | `checks/guard.cjs` checks the change against a write scope, runs the leg's acceptance commands, and writes `provenance {clean, commit}`. A PASS without provenance is never called verified |
-| **Two switches** | **auto-accept** decides the verdict on work already dispatched and leaves the next step to you; **lazy mode** additionally plans and keeps the project moving |
-| **Takeover** | A claim is a steward; heartbeat proves recency, never existence. The second identical logic failure hands the task to a senior on the same worktree and disqualifies the old attempt |
-| **Peer channel** | Workers exchange high-density messages directly. A message cannot widen a scope, and a running peer is queued rather than interrupted |
-| **Progress** | A bar whose denominator is the project's own milestones, with a current-work line — a manifest is a record, not backlog |
 
 ## Sandbox: why a leg asks you for nothing
 
-`tools/sandbox/` puts a bubblewrap boundary around two providers so a worker can write only to its own worktree, its
-agent state, and `/tmp`:
+Three providers run legs on this machine, and two of them are contained by bubblewrap rather than by asking:
 
-- `claude-sbx` — a daemon provider override whose command is `tools/sandbox/claude-sandboxed`
-- `opencode-sbx` — an entry on `PATH` in front of the real binary, because Paseo resolves the shared OpenCode server
-  through `PATH`
+| provider | containment | install |
+|---|---|---|
+| `codex` | native `workspace-write` sandbox | built in |
+| `claude-sbx` | `tools/sandbox/claude-sandboxed` wraps the real binary | `tools/sandbox/install.sh` |
+| `opencode-sbx` | `tools/sandbox/opencode-global` sits on PATH in front of the real binary | `tools/sandbox/install.sh` |
 
-Inside an enforced sandbox, `bypassPermissions` removes clicks without removing containment. Codex needs none of this:
-`approval_policy: never` plus `sandbox_mode: workspace-write` already gives zero prompts and a working commit.
-
-```bash
-tools/sandbox/install.sh              # records the overrides, repoints the profiles
-tools/sandbox/install.sh --uninstall   # restores both
-```
-
-Automatic shell approval for a **non**-sandboxed provider ships **off**. A project may opt in; every approval is audited.
-
-## Known limitations — read before running unattended
-
-Stated here rather than buried in a changelog:
-
-1. **OpenCode runs one server per machine**, so its sandbox binds every leg's worktree. Two concurrent OpenCode legs can
-   reach each other's files. Prefer `claude-sbx` or `codex` for concurrent work, or run one leg at a time.
-2. **Git metadata breadth.** A leg may write the git directories it commits into; for a linked worktree that includes
-   the shared refs and hooks.
-3. **Peer messages are collaboration, not authorization.** They never stand in for a gate.
-
-`SECURITY.md` describes the model in full.
-
-## Develop
+Run the installer once per machine, then `paseo reload`:
 
 ```bash
-npm ci
-npx tsc --noEmit
-./tools/suite.sh        # 49 checks, machine-local, no network
+tools/sandbox/install.sh              # records two provider overrides and repoints three profiles
+tools/sandbox/install.sh --uninstall  # restores the previous config and the plain opencode binary
 ```
 
-The suite is the contract: every finding a review ever raised is pinned by a check, and a check that cannot fail is
-treated as decoration. `ARCHITECTURE.md` explains the moving parts and why each exists.
+What a sandboxed leg can write: its own worktree, the git directories that worktree commits into, its agent state
+directory, and `/tmp`. Everything else is read-only to it — `~/.ssh`, `~/.aws`, `/etc`, other projects.
 
-## Credits
+Two limits worth knowing, both recorded in `plan.md`:
 
-- Built as a Paseo plugin against the official plugin API — before/after lifecycle hooks, provider overrides, and typed
-  RPCs.
-- **Supported by OpenAI's GPT-6.1 Sol**, which carried the long design and repair legs and, more than once, found the
-  contradiction in a plan before any code was written.
-- The supervision model absorbs the **dynamic-workflow ideas pioneered by Claude Code (cl)**: declare the work, let a
-  machine verify it, and spend human attention only where judgement is genuinely required.
-- The review discipline that shaped this repository — one packet, one verdict, no findings without a repro — is borrowed
-  from the same tradition.
+- OpenCode's server is one process for the whole machine, so its sandbox contains the machine but does not separate one
+  leg from another.
+- `/tmp` stays shared with the host because Paseo's own MCP helpers are spawned from an AppImage mount there.
 
-## License
+## Install, run, verify
 
-MIT. See `LICENSE`.
+```bash
+paseo plugin install /home/nil/code/paseo-steward   # first time only
+paseo plugin reload  paseo-steward                  # after every edit
+paseo plugin ls      paseo-steward                  # must read `running`
+paseo plugin logs    paseo-steward                  # must reach `Plugin ready`, no error
+```
+
+`paseo plugin reload` also runs the deterministic suite first (`paseo.json` → `scripts.reload`), so a
+regression cannot ship by the plugin merely loading.
+
+## The three commands that matter
+
+```bash
+node checks/guard.cjs check --task <id> --base <sha> --commit <sha> --worktree <path> --registry .
+node checks/accept.cjs <leg>          # writes checks/out/<leg>-<sha>.json
+paseo usage                           # quota before anything expensive
+```
+
+A leg may be recorded as `accepted` only when the guard printed `SCOPE_PASS` **and** `GATE_PASS` and the
+artifact's commit equals the commit being accepted. A passing gate is **not** a review.
+
+## What it will not do
+
+- Start a second steward while one is claimed (`state=held` + a live agent is enough).
+- Answer a file write, a mode change or a grant. Those stay pending for you.
+- Report "accepted" without an artifact.
+- Count a read-only reviewer as an implementation slot.
+
+## Layout
+
+| Path | Holds |
+|---|---|
+| `server/` | the wheel, takeover, capitalist scan, permission policy, wake handler |
+| `client/` | pill popover, workspace panel, sidebar, screen |
+| `shared/` | Zod contracts and pure helpers (imported by both runtimes) |
+| `checks/` | deterministic gates and one test per behaviour; `tasks/` holds manifests |
+| `control/` | `COMMAND.md` (ledger + protocol), `RESUME.md` (one-screen hand-over) |
+| `reviews/`, `redteam/` | independent verdicts and adversarial probes |
+
+## Quotas
+
+Junior work runs on the **free** opencode tier. `claude` keeps ≥ 30 % of its weekly quota and `codex` ≥ 20 %;
+below a floor they are only used for takeover, review, merge and acceptance.

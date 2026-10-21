@@ -2,8 +2,12 @@
   "id": "paseo-steward",
   "name": "Steward",
   "$comment": "Pipeline supervision for a long-running Paseo-orchestrated project: reads control/COMMAND.md, control/MERGES.md, control/WAVES.md, output/status-one-pager.md, runs/ledger.jsonl and the solver fork state, then shows lease, slot occupancy, blocked legs and the owner's batched questions. Its own tick dispatches the steward into ONE configured workspace, because `paseo schedule` creates a new workspace per run. No network access of its own.",
-  "media": [],
+  "media": [
+    "https://raw.githubusercontent.com/nillinjay/paseo-steward/main/docs/media/steward-screen.png",
+    "https://raw.githubusercontent.com/nillinjay/paseo-steward/main/docs/media/pill-popover.png"
+  ],
   "requirements": {
     "paseo": ">=0.12.0-beta.3"
-  }
+  },
+  "description": "One steward per project: dispatches legs into per-leg worktrees, verifies each with a deterministic gate, and accepts only artifacts that carry provenance. Auto-accept decides the verdict on work already dispatched; lazy mode also plans."
 }
