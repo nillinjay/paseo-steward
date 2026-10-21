@@ -1,0 +1,42 @@
+const assert = require('node:assert/strict');
+const {execFileSync} = require('node:child_process');
+const path = require('node:path');
+const fs = require('node:fs');
+const tmp = fs.mkdtempSync('/tmp/leg29-');
+execFileSync('npx',['esbuild','server/steward.ts','--bundle','--platform=node','--format=cjs','--outfile='+tmp+'/server.cjs','--external:@getpaseo/*'],{stdio:'ignore'});
+process.env.NODE_PATH=path.resolve('node_modules'); require('node:module')._initPaths();
+const s=require(tmp+'/server.cjs');
+for(const r of [{name:'Bash'},{name:'Bash',kind:'tool'},{name:'Bash',kind:'unknown',input:{command:'ls'}},{name:'Bash',kind:'tool',input:{}},{name:'Bash',kind:'tool',input:[]}]) assert.equal(s.authoritativeRequest(r),false);
+assert.equal(s.authoritativeRequest({name:'Bash',kind:'tool',input:{command:'ls'}}),true);
+console.log('PASS authoritative kind and structured input required');
+for(const command of ['git clean --force --directories','git reset --hard','git push --force-with-lease','chmod --recursive 777 .','git filter-repo --path x','git filter-branch --tree-filter x','rm --recursive x']) {
+ assert.equal(s.destructiveShell(JSON.stringify({command}),tmp),true,command);
+ assert.ok(s.destructiveOperation(JSON.stringify({command}),tmp),command);
+}
+console.log('PASS destructive long options name the operation');
+const cfg={autoAllowShell:true};
+const work=path.join(tmp,'work'), outside=path.join(tmp,'outside');
+fs.mkdirSync(work); fs.mkdirSync(outside);
+// Use a target outside scratch too, because /tmp itself is an authorized scratch root.
+fs.symlinkSync('/home',path.join(work,'link'));
+assert.equal(s.decideEdit(cfg,work,JSON.stringify({file_path:'/tmp/../../home/owner/private.txt'})),null);
+assert.equal(s.decideEdit(cfg,work,JSON.stringify({file_path:path.join(work,'link/owner/private.txt')})),null);
+assert.equal(s.decideEdit(cfg,work,JSON.stringify({file_path:'nested/new/file.txt'})),'allow');
+console.log('PASS normalized and canonical edit containment');
+execFileSync('npx',['esbuild','client/model.ts','--bundle','--platform=node','--format=cjs','--outfile='+tmp+'/model.cjs'],{stdio:'ignore'});
+const {stewardStatus}=require(tmp+'/model.cjs');
+const state={onboarded:true,agentsReadable:true,lease:{claimed:true,agentPresent:true,paseoAgent:'a',heartbeatAgeMinutes:0},config:{pendingWakes:[]},warnings:[],dispatchLock:null,liveAgents:[],permissions:{readable:true,pending:[]}};
+assert.equal(stewardStatus(state).tone,'success');
+state.spawnReservation={at:new Date().toISOString(),agentId:null,reconciliation:'awaiting-agent'};
+assert.equal(stewardStatus(state).tone,'warning');assert.match(stewardStatus(state).detail,/启动预约/);
+state.spawnReservation=null;state.config.takeoverError='spawn timed out';
+assert.equal(stewardStatus(state).tone,'warning');assert.match(stewardStatus(state).detail,/spawn timed out/);
+console.log('PASS unresolved reservation and takeover failure cannot show green');
+for(const input of [{command:'',cmd:'git clean --force --directories'},{command:3,cmd:'git clean --force --directories'},{command:'ls',cmd:'git clean --force --directories'}]) assert.equal(s.authoritativeRequest({name:'Bash',kind:'tool',input}),false);
+console.log('PASS malformed or ambiguous command aliases stay pending');
+fs.symlinkSync('/home/owner/definitely-missing-file',path.join(work,'dangling'));
+assert.equal(s.decideEdit(cfg,work,JSON.stringify({file_path:path.join(work,'dangling')})),null);
+assert.equal(s.decideEdit(cfg,work,JSON.stringify({file_path:path.join(work,'dangling/new.txt')})),null);
+console.log('PASS unresolved symlinks remain pending');
+assert.equal(s.authoritativeRequest({name:'Write',kind:'tool',input:{file_path:'/tmp/safe',path:'/home/owner/private.txt'}}),false);
+console.log('PASS conflicting path aliases remain pending');

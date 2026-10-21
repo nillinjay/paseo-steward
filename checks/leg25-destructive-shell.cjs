@@ -1,0 +1,13 @@
+const {execFileSync}=require('node:child_process');
+const assert=require('node:assert/strict');
+const fs=require('node:fs'), path=require('node:path'), os=require('node:os');
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'leg25'));
+fs.writeFileSync(path.join(root,'scratch'),'temporary');
+fs.writeFileSync(path.join(root,'build'),'generated');
+execFileSync('npx',['esbuild','server/steward.ts','--bundle','--platform=node','--format=cjs','--external:@getpaseo/*','--outfile=/tmp/t124-shell.cjs'],{stdio:'ignore'});
+process.env.NODE_PATH=process.cwd()+'/node_modules'; require('node:module').Module._initPaths();
+const {destructiveShell}=require('/tmp/t124-shell.cjs');
+for(const command of ['git push --force','git push -f','git push --force-with-lease','git reset --hard','rm -fr /home/private','rm -rf /tmp/scratch','rm -rf build','rm --recursive build','git clean -fdx','git clean --force --directories','git clean --ignored','chmod -R 777 .','chmod --recursive 777 .','shutdown now','reboot','rm -rf .git','git filter-repo','git filter-branch']) assert.equal(destructiveShell(JSON.stringify({command}),root),true,command);
+for(const command of ['git commit -m ok','npm test','rm '+path.join(root,'scratch'),'rm build']) assert.equal(destructiveShell(JSON.stringify({command}),root),false,command);
+for(const command of ['rm /tmp/scratch','rm missing-parent/file']) assert.equal(destructiveShell(command,root),true,command);
+console.log('PASS destructive shell denylist, including long-form options; ordinary non-recursive commands and physical worktree scratch allowed; external scratch and missing parents pending');

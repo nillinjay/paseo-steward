@@ -1,0 +1,109 @@
+#!/bin/sh
+# PATH-level entry for `opencode`.
+#
+# Why it lives here and not in a provider override: Paseo's opencode provider resolves the *server* binary through
+# PATH (`resolveOpenCodeBinary`), and a `command` override in the daemon config only affects the availability probe
+# (measured 2026-10-21: the server still started as `~/.local/bin/opencode serve ...`). So the wrapper has to
+# be the binary PATH finds.
+#
+# Behaviour:
+#   * started from inside the Paseo home (that is where the shared server and every leg live) -> bubblewrap;
+#   * anything else (the owner typing `opencode` in a project) -> untouched;
+#   * PASEO_STEWARD_SANDBOX=0 -> untouched, for debugging;
+#   * bwrap missing inside the Paseo home -> refuse with exit 78. A leg's permissions assume the sandbox, so running
+#     it unsandboxed would keep the grant and lose the enforcement (V12-03). Outside the Paseo home it still passes
+#     through.
+set -eu
+
+
+# The real binary, wherever this wrapper was installed from: an explicit override, the canonical install, a `.real`
+# neighbour, or the first `opencode` on PATH that is not this wrapper.
+find_real() {
+  if [ -n "${PASEO_STEWARD_REAL_OPENCODE:-}" ]; then echo "$PASEO_STEWARD_REAL_OPENCODE"; return; fi
+  for candidate in "$HOME/.opencode/bin/opencode" "$(dirname "$0")/opencode.real" "$HOME/.local/bin/opencode.real"; do
+    [ -x "$candidate" ] && { echo "$candidate"; return; }
+  done
+  IFS=:
+  for dir in $PATH; do
+    case "$dir" in */.local/bin) continue;; esac
+    if [ -x "$dir/opencode" ]; then echo "$dir/opencode"; return; fi
+  done
+  unset IFS
+}
+
+REAL="$(find_real)"
+
+pass_through() {
+  [ -n "$REAL" ] || { echo "opencode: real binary not found" >&2; exit 127; }
+  exec "$REAL" "$@"
+}
+
+[ "${PASEO_STEWARD_SANDBOX:-1}" = "0" ] && pass_through "$@"
+
+PASEO_HOME_DIR="${PASEO_HOME:-$HOME/.paseo}"
+CWD="$(pwd)"
+case "$CWD" in
+  "$PASEO_HOME_DIR"|"$PASEO_HOME_DIR"/*) ;;
+  *) pass_through "$@" ;;
+esac
+
+command -v bwrap >/dev/null 2>&1 || {
+  echo "opencode: bwrap is not installed; refusing to run unsandboxed inside the Paseo home ($CWD)" >&2
+  exit 78
+}
+
+[ -x "$REAL" ] || { echo "opencode: real binary missing at $REAL" >&2; exit 78; }
+
+ARGS="--ro-bind / / --bind /tmp /tmp --dev /dev --proc /proc --die-with-parent --chdir $CWD"
+
+# Writable inside the Paseo home: the legs' worktrees and the server's own home (Paseo starts the server in
+# `$PASEO_HOME/opencode-home`), listed one by one -- not the whole Paseo home, which also holds the daemon's state
+# (V12-02). The working directory gets no bind of its own: it is one of these two, or it stays read-only.
+#
+# Cross-leg writes remain possible, and this wrapper cannot close them: Paseo runs ONE OpenCode server per machine
+# for every leg, so one process, one mount namespace, one writable `worktrees/`. A leg's shell can still write into
+# another leg's worktree. Isolating legs needs a server per leg, which Paseo does not do.
+for path in "$PASEO_HOME_DIR/worktrees" "$PASEO_HOME_DIR/opencode-home"; do
+  [ -d "$path" ] && ARGS="$ARGS --bind $path $path"
+done
+
+# The git metadata a worktree claims, if the claim is one we can bind; prints `<metadata> <repo>/.git` or nothing.
+# The claim is text inside the worktree, which the worker can rewrite: `gitdir: /` once made the whole machine
+# writable (V12-01). So it must resolve to an existing `<repo>/.git/worktrees/<name>` whose `<repo>/.git` exists, and
+# neither path may be `/` or contain the worktree or the Paseo home. Same rule as `gitMetadataRoots` in
+# server/grants.ts and `git_meta_roots` in claude-sandboxed.
+git_meta_roots() {
+  case "$1" in /*) ;; *) return 1;; esac
+  meta="$(readlink -f -- "$1" 2>/dev/null)" || return 1
+  [ -d "$meta" ] || return 1
+  dotgit="$(dirname "$(dirname "$meta")")"
+  [ "$(basename "$(dirname "$meta")")" = worktrees ] && [ "$(basename "$dotgit")" = .git ] && [ -d "$dotgit" ] || return 1
+  for guarded in "$2" "$PASEO_HOME_DIR"; do
+    guarded="$(readlink -f -- "$guarded" 2>/dev/null || printf '%s' "$guarded")"
+    case "$guarded/" in "$meta"/*|"$dotgit"/*) return 1;; esac
+  done
+  printf '%s %s\n' "$meta" "$dotgit"
+}
+
+# A linked worktree keeps `gitdir: <main repo>/.git/worktrees/<name>` in a file, so committing writes outside the
+# worktree. Bind exactly those git directories, discovered from the worktrees that exist when the server starts --
+# not the whole of ~/code.
+for pointer in "$PASEO_HOME_DIR"/worktrees/*/*/.git; do
+  [ -f "$pointer" ] || continue
+  target="$(sed -n 's/^gitdir: //p' "$pointer" 2>/dev/null | head -1)"
+  [ -n "$target" ] || continue
+  if ! roots="$(git_meta_roots "$target" "$(dirname "$pointer")")"; then
+    echo "opencode: ignoring git pointer in $pointer (not <repo>/.git/worktrees/<name>): $target" >&2
+    continue
+  fi
+  for path in $roots; do ARGS="$ARGS --bind $path $path"; done
+done
+# /tmp stays shared with the host: Paseo's own MCP helpers live in an AppImage mount there and must spawn from the
+# sandbox. /tmp is scratch, is excluded from every deliverable, and the gate reads only committed differences.
+
+for path in "$HOME/.local/share/opencode" "$HOME/.local/share/opencode-go" "$HOME/.cache/opencode" "$HOME/.config/opencode" "$HOME/.config/opencode-go"; do
+  [ -e "$path" ] && ARGS="$ARGS --bind $path $path"
+done
+
+# shellcheck disable=SC2086 # ARGS is a deliberate list of bwrap arguments.
+exec bwrap $ARGS "$REAL" "$@"

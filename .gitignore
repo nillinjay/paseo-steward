@@ -1,0 +1,14 @@
+# Dependencies and build output
+node_modules/
+
+# Local machine state, never published
+.locks/
+.claude/
+*.log
+
+# The guard writes its own evidence here. It must never enter a business commit: a leg that commits it fails its own
+# scope check, and the failure looks like a code problem. The local exclude also makes `git add -A` skip it.
+checks/out/
+
+# Editor / OS
+.DS_Store

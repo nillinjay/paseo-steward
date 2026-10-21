@@ -1,0 +1,11 @@
+require('./leg31-shell-quoting.cjs');
+const fs=require('node:fs'), path=require('node:path'), os=require('node:os'), assert=require('node:assert/strict');
+const {destructiveOperation}=require('/tmp/t147-shell.cjs');
+const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'t147-containment-'));
+const root=path.join(tmp,'tree'), outside=path.join(tmp,'private');
+fs.mkdirSync(root);fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'notes.txt'),'private');
+fs.symlinkSync(outside,path.join(root,'outside'));fs.symlinkSync(outside,path.join(root,'-outside'));fs.writeFileSync(path.join(root,'inside.txt'),'ok');
+for(const command of ['cd /home/owner/private; rm -f inside.txt','rm -- -outside/notes.txt','mv inside.txt --target-directory=/home/owner/private','rm -f outside/notes.txt','mv outside/notes.txt inside.txt','truncate -s 0 outside/notes.txt','rm missing/notes.txt']) assert.ok(destructiveOperation(command,root),command);
+assert.equal(destructiveOperation('truncate > outside/notes.txt',root),null);
+assert.equal(destructiveOperation('rm -f inside.txt',root),null);
+console.log('PASS symlink escape refused, physical inside allowed, missing parent pending; mv and truncate covered');

@@ -1,0 +1,215 @@
+[
+  {
+    "id": "leg7",
+    "title": "the hand-over takes 30 seconds, not 35 minutes",
+    "base": "ce155d8d4c9081a83aa95a7727c51509297482ef",
+    "commands": [
+      {
+        "cmd": "npx tsc --noEmit",
+        "timeoutSeconds": 120
+      }
+    ],
+    "writeSet": [
+      "server/steward.ts",
+      "shared/steward.ts",
+      "checks/leg7-handover.cjs",
+      "paseo.json",
+      "control/COMMAND.md",
+      "plan.md",
+      "STATUS.md"
+    ],
+    "criteria": [
+      {
+        "code": "C1",
+        "text": "`node checks/leg7-handover.cjs` exits `0`, with every case passing against throwaway roots and a\n  fake `paseo` binary — released dispatches, live lease not pre-empted, stale dispatches, a future\n  `nextTickAt` suppresses and a past one fires, and the floor holds."
+      },
+      {
+        "code": "C2",
+        "text": "`npx tsc --noEmit` exit `0`; reload reaches `Plugin ready`."
+      },
+      {
+        "code": "C3",
+        "text": "In the daemon, `nextTickAt` appears in `~/.paseo-steward.json` for every enabled project, and a\n  stale project is dispatched at the first beat at or after `lastDispatchAt + 2 min` — **≤ 150 s** — with a\n  `[paseo-steward] wheel (…)` line in\n  `paseo plugin logs` — the log line, not `tick.running`, because that flag is in-process state a reload\n  resets."
+      },
+      {
+        "code": "C4",
+        "text": "Write set confined to `server/steward.ts`, `shared/steward.ts`, `checks/leg7-handover.cjs`,\n  `paseo.json`, `control/COMMAND.md`, `plan.md`, `STATUS.md`."
+      },
+      {
+        "code": "C5",
+        "text": "The released-lease rule is written into `control/COMMAND.md`, because a protocol the successor\n  does not read is not a protocol."
+      }
+    ],
+    "retired": "Superseded by LEG 10: the owner ruled that a claimed lease is a steward, so the released/stale dispatch triggers this check tested no longer exist. Its surviving properties (the persisted floor, the persisted schedule) are asserted in checks/leg9-lazy.cjs and checks/leg10-takeover.cjs."
+  },
+  {
+    "id": "leg8",
+    "title": "the acceptance runner: a manifest, a scope diff and a gate, in one command",
+    "base": "6f7f10339c9c9c70c0148b3d1b90c8d54974921a",
+    "commands": [
+      {
+        "cmd": "node checks/leg8-runner.cjs",
+        "timeoutSeconds": 120
+      },
+      {
+        "cmd": "npx tsc --noEmit",
+        "timeoutSeconds": 120
+      }
+    ],
+    "writeSet": [
+      "checks/accept.cjs",
+      "checks/leg8-runner.cjs",
+      "checks/legs.json",
+      "paseo.json"
+    ],
+    "criteria": [
+      {
+        "code": "C1",
+        "text": "`node checks/accept.cjs <leg>` exits `0` for a leg whose commands all pass, and writes\n  `checks/out/<leg>-<sha>.json` whose `sha` equals `git rev-parse HEAD` at run time."
+      },
+      {
+        "code": "C2",
+        "text": "The negative control exists and fails: a registry entry whose declared command exits non-zero\n  produces `verdict: \"rejected\"` and process exit `1`, through the identical code path; an unknown leg id\n  exits `2`. A check that cannot fail is not a check."
+      },
+      {
+        "code": "C3",
+        "text": "The artifact records, per command, the command string, its exit code and its duration, and records\n  the leg's declared write set beside the files actually changed (`git diff --name-only <base>..HEAD`).\n  A missing or unreadable `base` is recorded as a reason, not silently skipped."
+      },
+      {
+        "code": "C4",
+        "text": "`npx tsc --noEmit` exits `0` and `node checks/leg7-handover.cjs` still exits `0` — no regression\n  in the checks an earlier leg established."
+      },
+      {
+        "code": "C5",
+        "text": "Write set confined to `checks/**`, `paseo.json`, `plan.md`, `STATUS.md`, `docs/leg8-2026-10-19.md`.\n  `control/COMMAND.md` untouched, not staged, never `git add -A`."
+      }
+    ],
+    "recovered": "2026-10-20: this entry was never written when the leg landed, so checks/leg8-registry.cjs had been failing since 2026-10-19 and a `$?`-after-command-substitution bug in the steward's suite loop hid it. The check was right; the registry was wrong."
+  },
+  {
+    "id": "leg8-negative-control",
+    "title": "LEG 8 mandatory negative control",
+    "base": "3f1cd9e3579f0f1489b7cbb360642d3979cb4477",
+    "commands": [
+      {
+        "cmd": "node -e \"process.exit(3)\"",
+        "timeoutSeconds": 10
+      }
+    ],
+    "writeSet": [
+      "checks/**",
+      "checks/legs.json",
+      "paseo.json",
+      "plan.md",
+      "STATUS.md",
+      "docs/leg8-2026-10-19.md"
+    ],
+    "criteria": []
+  },
+  {
+    "id": "leg9",
+    "title": "懒人模式: unattended progression, and a running session outranks every timer",
+    "base": "3f1cd9e3579f0f1489b7cbb360642d3979cb4477",
+    "commands": [
+      {
+        "cmd": "node checks/leg9-lazy.cjs",
+        "timeoutSeconds": 90
+      },
+      {
+        "cmd": "npx tsc --noEmit",
+        "timeoutSeconds": 120
+      }
+    ],
+    "writeSet": [
+      "server/steward.ts",
+      "shared/steward.ts",
+      "index.server.ts",
+      "client/composer-pill.tsx",
+      "client/strings.ts",
+      "checks/leg9-lazy.cjs",
+      "checks/leg7-handover.cjs",
+      "checks/legs.json",
+      "paseo.json",
+      "plan.md",
+      "STATUS.md",
+      "OVERVIEW.md",
+      "control/COMMAND.md"
+    ],
+    "criteria": [
+      {
+        "code": "C1",
+        "text": "`node checks/leg9-lazy.cjs` exits `0`: OFF dispatches nothing, ON hands over, a RUNNING session\n  blocks a second one however stale its heartbeat, the same lease dispatches once the session is gone, the\n  floor survives a fresh module, a finished worker wakes the same session with `steer`, and the steward's own\n  turn does not wake itself."
+      },
+      {
+        "code": "C2",
+        "text": "`node checks/leg7-handover.cjs` and `npx tsc --noEmit` exit `0`; reload reaches `Plugin ready`."
+      },
+      {
+        "code": "C3",
+        "text": "In the daemon, a real worker's `turn_ended` produces one `[paseo-steward] lazy: woke steward …` line\n  and **no new agent appears** — the wake must not cost an agent."
+      },
+      {
+        "code": "C4",
+        "text": "The button and its hint live in the popover; every string in `client/strings.ts`; disabled without a\n  workspace."
+      },
+      {
+        "code": "C5",
+        "text": "Write set confined to the declared list; `plan.md`, `STATUS.md`, `OVERVIEW.md` and\n  `control/COMMAND.md` updated."
+      }
+    ]
+  },
+  {
+    "id": "leg10",
+    "title": "接管 and the capitalist rule: a claimed lease is a steward, and idle slots are waste",
+    "base": "c743933",
+    "commands": [
+      {
+        "cmd": "node checks/leg10-takeover.cjs",
+        "timeoutSeconds": 120
+      },
+      {
+        "cmd": "node checks/leg9-lazy.cjs",
+        "timeoutSeconds": 120
+      },
+      {
+        "cmd": "npx tsc --noEmit",
+        "timeoutSeconds": 120
+      }
+    ],
+    "writeSet": [
+      "server/steward.ts",
+      "shared/steward.ts",
+      "client/model.ts",
+      "client/strings.ts",
+      "client/composer-pill.tsx",
+      "client/steward.tsx",
+      "client/sidebar.tsx",
+      "checks/leg10-takeover.cjs",
+      "checks/leg9-lazy.cjs",
+      "checks/legs.json",
+      "paseo.json",
+      "plan.md",
+      "STATUS.md",
+      "OVERVIEW.md",
+      "control/COMMAND.md"
+    ],
+    "criteria": [
+      {
+        "code": "C1",
+        "text": "`node checks/leg10-takeover.cjs` exits 0: a claimed lease is a steward however old the heartbeat; a released block starts nobody while an agent is claimed; 接管 starts exactly one steward when there is no claim or the claimed agent is gone; the persisted floor holds; the capitalist poke fires once per five minutes and never when the Ready queue is empty; a worker's finish wakes the same steward session and the steward's own turn does not."
+      },
+      {
+        "code": "C2",
+        "text": "`checks/leg9-lazy.cjs`, `checks/leg7-handover.cjs` and `npx tsc --noEmit` exit 0; reload reaches `Plugin ready`."
+      },
+      {
+        "code": "C3",
+        "text": "The pill and the screen read 在岗 / 无主管 / 主管已不在 from the claim, not from heartbeat age. An old heartbeat is a detail line, never a status."
+      },
+      {
+        "code": "C4",
+        "text": "Write set confined to the declared list."
+      }
+    ]
+  }
+]

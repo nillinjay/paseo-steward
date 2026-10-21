@@ -1,0 +1,82 @@
+#!/bin/sh
+# Run the real `claude` inside a bubblewrap sandbox that can only write to the agent's own worktree.
+#
+# Why this exists: Paseo's built-in claude provider accepts a `sandbox` option in its schema but never forwards it to
+# the SDK (measured 2026-10-21: no reference to `sandbox` in providers/claude/agent.ts), so a claude leg cannot get an
+# enforced sandbox from providerOptions. A daemon provider override can replace the launch command instead, and this
+# script is that command: the same provider integration, one process per session, wrapped in a real namespace.
+#
+# Inside the sandbox, `bypassPermissions` is sound: a command that cannot reach anything outside the worktree has
+# nothing left to approve.
+set -eu
+
+fail() { echo "claude-sandboxed: $*" >&2; exit 78; }
+
+# Escape hatch, for a human debugging: PASEO_STEWARD_SANDBOX=0 runs the binary untouched.
+if [ "${PASEO_STEWARD_SANDBOX:-1}" = "0" ]; then
+  exec "$(dirname "$0")/../../.real-claude" "$@" 2>/dev/null || true
+fi
+
+command -v bwrap >/dev/null 2>&1 || fail "bwrap is not installed; refusing to run unsandboxed"
+
+# The real binary: an explicit override for tests, otherwise the first `claude` outside this script's directory.
+REAL="${PASEO_STEWARD_REAL_CLAUDE:-}"
+if [ -z "$REAL" ]; then
+  IFS=:
+  for dir in $PATH; do
+    case "$dir" in "$(dirname "$0")") continue;; esac
+    if [ -x "$dir/claude" ]; then REAL="$dir/claude"; break; fi
+  done
+  unset IFS
+fi
+[ -n "$REAL" ] && [ -x "$REAL" ] || fail "no claude binary found on PATH"
+
+WORKTREE="$(pwd)"
+[ -d "$WORKTREE" ] || fail "working directory disappeared: $WORKTREE"
+
+ARGS="--ro-bind / / --bind /tmp /tmp --dev /dev --proc /proc --die-with-parent --chdir $WORKTREE --bind $WORKTREE $WORKTREE"
+
+# The git metadata a worktree claims, if the claim is one we can bind; prints `<metadata> <repo>/.git` or nothing.
+# Git reads the claim from `.git` and `commondir` inside the worktree's reach, so a worker can point it anywhere,
+# including `/` (V12-01). It must resolve to an existing `<repo>/.git/worktrees/<name>` whose `<repo>/.git` exists,
+# and neither path may be `/` or contain the worktree or the Paseo home. Same rule as `gitMetadataRoots` in
+# server/grants.ts and `git_meta_roots` in opencode-global.
+PASEO_HOME_DIR="${PASEO_HOME:-$HOME/.paseo}"
+git_meta_roots() {
+  case "$1" in /*) ;; *) return 1;; esac
+  meta="$(readlink -f -- "$1" 2>/dev/null)" || return 1
+  [ -d "$meta" ] || return 1
+  dotgit="$(dirname "$(dirname "$meta")")"
+  [ "$(basename "$(dirname "$meta")")" = worktrees ] && [ "$(basename "$dotgit")" = .git ] && [ -d "$dotgit" ] || return 1
+  for guarded in "$2" "$PASEO_HOME_DIR"; do
+    guarded="$(readlink -f -- "$guarded" 2>/dev/null || printf '%s' "$guarded")"
+    case "$guarded/" in "$meta"/*|"$dotgit"/*) return 1;; esac
+  done
+  printf '%s %s\n' "$meta" "$dotgit"
+}
+
+# A linked worktree keeps its git metadata in the main repository, so committing needs those paths writable too. A
+# repository whose metadata already sits inside the worktree needs nothing more.
+GIT_DIR="$(git -C "$WORKTREE" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
+case "$(readlink -f -- "$GIT_DIR" 2>/dev/null)/" in
+  "/") ;;
+  "$(readlink -f -- "$WORKTREE")"/*) ;;
+  *)
+    if roots="$(git_meta_roots "$GIT_DIR" "$WORKTREE")"; then
+      for path in $roots; do ARGS="$ARGS --bind $path $path"; done
+    else
+      echo "claude-sandboxed: not binding git metadata (not <repo>/.git/worktrees/<name>): $GIT_DIR" >&2
+    fi
+    ;;
+esac
+
+# The CLI keeps its login, settings and session history here; without a writable copy it cannot start a session.
+# /tmp stays shared with the host: Paseo's own MCP helpers live in an AppImage mount there and must spawn from the
+# sandbox. /tmp is scratch, is excluded from every deliverable, and the gate reads only committed differences.
+
+for path in "$HOME/.claude" "$HOME/.claude.json" "$HOME/.config/claude"; do
+  if [ -e "$path" ]; then ARGS="$ARGS --bind $path $path"; fi
+done
+
+# shellcheck disable=SC2086 # ARGS is a deliberate list of bwrap arguments.
+exec bwrap $ARGS "$REAL" "$@"

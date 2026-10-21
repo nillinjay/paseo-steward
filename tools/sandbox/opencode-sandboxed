@@ -1,0 +1,50 @@
+#!/bin/sh
+# Run the real `opencode` inside bubblewrap.
+#
+# Unlike claude, Paseo runs ONE opencode server per provider for the whole machine, started with a neutral working
+# directory (providers/opencode/server-manager.ts, `startServer`). A per-worktree bind therefore cannot be aimed at
+# one leg. What this wrapper can still do is put a real boundary around the machine: the filesystem is read-only
+# except the Paseo home (where every leg's worktree lives), the agent's own state directories, and its working
+# directory. Writes to /etc, /usr, ~/.ssh, ~/.aws or any other project outside the Paseo home are refused by the
+# kernel, and /tmp is a private tmpfs.
+#
+# Consequence, stated plainly: two legs inside the Paseo home can still reach each other's worktrees. This is
+# containment of the machine, not isolation between legs.
+set -eu
+
+fail() { echo "opencode-sandboxed: $*" >&2; exit 78; }
+
+if [ "${PASEO_STEWARD_SANDBOX:-1}" = "0" ]; then
+  exec "$(dirname "$0")/../../.real-opencode" "$@" 2>/dev/null || true
+fi
+
+command -v bwrap >/dev/null 2>&1 || fail "bwrap is not installed; refusing to run unsandboxed"
+
+REAL="${PASEO_STEWARD_REAL_OPENCODE:-}"
+if [ -z "$REAL" ]; then
+  IFS=:
+  for dir in $PATH; do
+    case "$dir" in "$(dirname "$0")") continue;; esac
+    if [ -x "$dir/opencode" ]; then REAL="$dir/opencode"; break; fi
+  done
+  unset IFS
+fi
+[ -n "$REAL" ] && [ -x "$REAL" ] || fail "no opencode binary found on PATH"
+
+PASEO_HOME_DIR="${PASEO_HOME:-$HOME/.paseo}"
+CWD="$(pwd)"
+
+ARGS="--ro-bind / / --tmpfs /tmp --dev /dev --proc /proc --die-with-parent"
+
+# The working directory the server was started in, plus the two roots a leg actually writes to.
+for path in "$CWD" "$PASEO_HOME_DIR"; do
+  [ -d "$path" ] && ARGS="$ARGS --bind $path $path"
+done
+
+# The CLI keeps models, sessions and credentials here; without them it cannot serve a session.
+for path in "$HOME/.local/share/opencode" "$HOME/.local/share/opencode-go" "$HOME/.cache/opencode" "$HOME/.config/opencode" "$HOME/.config/opencode-go"; do
+  [ -e "$path" ] && ARGS="$ARGS --bind $path $path"
+done
+
+# shellcheck disable=SC2086 # ARGS is a deliberate list of bwrap arguments.
+exec bwrap $ARGS --chdir "$CWD" "$REAL" "$@"

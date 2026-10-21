@@ -1,0 +1,53 @@
+{
+  "name": "paseo-steward",
+  "version": "0.1.0",
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "LICENSE",
+    "index.client.ts",
+    "index.client.tsx",
+    "index.server.ts",
+    "index.server.tsx",
+    "client/",
+    "server/",
+    "shared/",
+    "tools/",
+    "skills/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "./tools/suite.sh"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.12.0-beta.3",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^26.6.5",
+    "@types/react": "~19.2.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  },
+  "description": "A Paseo plugin that supervises a project like a steward: dispatches legs into their own worktrees, verifies them with a deterministic gate, accepts only artifacts with provenance, and asks a human nothing it can decide itself.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nillinjay/paseo-steward.git"
+  },
+  "homepage": "https://github.com/nillinjay/paseo-steward#readme",
+  "bugs": {
+    "url": "https://github.com/nillinjay/paseo-steward/issues"
+  },
+  "keywords": [
+    "paseo",
+    "paseo-plugin",
+    "orchestration",
+    "agents",
+    "supervision",
+    "worktree"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "task_id": "T-001",
+  "lane": "standard",
+  "risk": "R0",
+  "base": "0000000000000000000000000000000000000000",
+  "write_scope": [
+    "checks/"
+  ],
+  "forbidden": [
+    "docs/"
+  ],
+  "ops_actions": [],
+  "allowed_commands": [],
+  "acceptance": [
+    {
+      "kind": "cmd",
+      "cmd": "npx tsc --noEmit"
+    }
+  ],
+  "tier": "junior",
+  "p0_or_p1": "P0",
+  "brief_kind": "delivery",
+  "expires_at": null,
+  "reference": [],
+  "cancel_how": "example manifest — the base is a placeholder"
+}

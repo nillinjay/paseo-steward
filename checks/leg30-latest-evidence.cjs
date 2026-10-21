@@ -1,0 +1,22 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),path=require('node:path');
+const {execFileSync}=require('node:child_process');
+const tmp=fs.mkdtempSync('/tmp/leg30-');
+const git=(...args)=>execFileSync('git',args,{cwd:tmp,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+git('init'); git('config','user.name','Check'); git('config','user.email','check@example.invalid');
+const commit=()=>{git('commit','--allow-empty','-qm','fixture');return git('rev-parse','HEAD')};
+const A=commit(),B=commit(),C=commit();
+fs.mkdirSync(path.join(tmp,'checks/out'),{recursive:true});
+const write=(sha,verdict,generated_at)=>fs.writeFileSync(path.join(tmp,`checks/out/T-test-${sha}.json`),JSON.stringify({task:'T-test',commit:sha,verdict,generated_at,scope:{pass:true},gate:{pass:true,commands:[{cmd:'true',exit_code:0}]},provenance:{clean:true,commit:sha}}));
+write(A,'PASS','2030-01-01');write(B,'FAIL','2020-01-01');
+execFileSync('npx',['esbuild','server/steward.ts','--bundle','--platform=node','--format=cjs','--outfile='+tmp+'/s.cjs','--external:@getpaseo/*'],{stdio:'ignore'});
+process.env.NODE_PATH=path.resolve('node_modules');require('node:module')._initPaths();
+const s=require(tmp+'/s.cjs');
+let row=s.acceptanceState(tmp,C)[0];assert.equal(row.sha,B);assert.equal(row.status,'failed');assert.equal(row.allCommandsPassed,false);
+write(B,'PASS','2020-01-01');assert.equal(s.acceptanceState(tmp,C)[0].status,'certified');
+const file=path.join(tmp,`checks/out/T-test-${B}.json`);const record=JSON.parse(fs.readFileSync(file));delete record.provenance;fs.writeFileSync(file,JSON.stringify(record));
+assert.equal(s.acceptanceState(tmp,C)[0].allCommandsPassed,false);
+console.log('PASS A -> B -> C: later FAIL supersedes older PASS regardless of timestamp; ancestor PASS needs clean provenance');
+
+assert.equal(s.acceptanceState(tmp,B)[0].status,"legacy-artifact");
+console.log("PASS evidence at HEAD also requires clean committed-tree provenance");

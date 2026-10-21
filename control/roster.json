@@ -1,0 +1,52 @@
+{
+  "template": true,
+  "_comment": "Example roster. Roles are the only names a dispatch may use; the dispatcher refuses a hand-written model.",
+  "profiles": [
+    "pi-总管",
+    "junior-a",
+    "junior-b",
+    "senior-sol",
+    "senior-opus",
+    "review-codex",
+    "review-gemini"
+  ],
+  "routing": {
+    "steward": "pi-总管",
+    "implementation": "junior-a",
+    "implementation-second-model": "junior-b",
+    "senior": "senior-sol",
+    "ui": "senior-opus",
+    "review": "review-codex",
+    "review-alternate-family": "review-gemini"
+  },
+  "budget": {
+    "pi-总管": {
+      "narrow": false,
+      "max_cached_tokens": 120000
+    },
+    "junior-a": {
+      "narrow": false,
+      "max_cached_tokens": 120000
+    },
+    "junior-b": {
+      "narrow": false,
+      "max_cached_tokens": 120000
+    },
+    "senior-sol": {
+      "narrow": false,
+      "max_cached_tokens": 120000
+    },
+    "senior-opus": {
+      "narrow": false,
+      "max_cached_tokens": 120000
+    },
+    "review-codex": {
+      "narrow": true,
+      "max_cached_tokens": 120000
+    },
+    "review-gemini": {
+      "narrow": true,
+      "max_cached_tokens": 120000
+    }
+  }
+}
